@@ -494,7 +494,7 @@ Configuration ConfigurationWorkload {
                     Start-Process -FilePath 'C:\sql_server_install\Setup.exe' -ArgumentList '/Action=Uninstall /FEATURES=SQL,AS,IS,RS /INSTANCENAME=MSSQLSERVER /Q' -PassThru -Wait
 
                     # Remove the SQL Server service
-                    SC DELETE MSSQLSERVER
+                    sc.exe delete MSSQLSERVER
 
                     New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{
                         deployment_name = $using:deploymentName

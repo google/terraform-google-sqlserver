@@ -694,7 +694,7 @@ Configuration ConfigurationWorkload {
                             time = (Get-Date).ToString();
                             instance_name = $using:ComputerName;
                         }
-                        googet addrepo google-cloud-workload-agent https://packages.cloud.google.com/yuck/repos/google-cloud-workload-agent-windows-x86_64-unstable
+                        googet addrepo google-cloud-workload-agent https://packages.cloud.google.com/yuck/repos/google-cloud-workload-agent-windows-x86_64
                         googet -noconfirm install google-cloud-workload-agent
 
                         New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{

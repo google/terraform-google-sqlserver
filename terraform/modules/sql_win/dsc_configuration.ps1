@@ -694,14 +694,8 @@ Configuration ConfigurationWorkload {
                             time = (Get-Date).ToString();
                             instance_name = $using:ComputerName;
                         }
-                        googet addrepo google-cloud-sql-server-agent https://packages.cloud.google.com/yuck/repos/google-cloud-sql-server-agent-windows
-                        googet -noconfirm install google-cloud-sql-server-agent
-
-                        $pathWithArgs = (Get-CimInstance Win32_Service -Filter "Name='google-cloud-sql-server-agent'").PathName
-                        # Remove the action argument in the path
-                        $path = $pathWithArgs.Substring(0, $pathWithArgs.IndexOf('--action') - 1)
-                        $executionPath = $path.Trim('"')
-                        & $executionPath -logname=sql-server-deployments -logstatus=1 -logversion=1.0
+                        googet addrepo google-cloud-workload-agent https://packages.cloud.google.com/yuck/repos/google-cloud-workload-agent-windows-x86_64-unstable
+                        googet -noconfirm install google-cloud-workload-agent
 
                         New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{
                             deployment_name = $using:deploymentName

@@ -19,10 +19,10 @@ $deploymentTimeout = '${deploymentTimeout1}'
 $globalDeploymentTimeout = '${deploymentTimeout2}'
 $zone = '${zone}'
 enum StatusCode {
-    Success = 0
     Running = 1
-    GlobalTimeout = 2
+    Success = 2
     Timeout = 3
+    GlobalTimeout = 4
 }
 $configureLocalSSD = @'
 $isLocalSsd = '${isLocalSsd}';
@@ -149,13 +149,13 @@ function Log-SqlDeploymentUsageMetrics {
     param (
       [string] $state
     )
-    $service = Get-Service -Name 'google-cloud-sql-server-agent' -ErrorAction SilentlyContinue
+    $service = Get-Service -Name 'google-cloud-workload-agent' -ErrorAction SilentlyContinue
     if ($service.Status -eq 'Running') {
-        $pathWithArgs = (Get-CimInstance Win32_Service -Filter "Name='google-cloud-sql-server-agent'").PathName
-        $path = $pathWithArgs.Substring(0, $pathWithArgs.IndexOf('--action') - 1)
+        $pathWithArgs = (Get-CimInstance Win32_Service -Filter "Name='google-cloud-workload-agent'").PathName
+        $path = $pathWithArgs.Substring(0, $pathWithArgs.IndexOf('winservice') - 1)
         $executionPath = $path.Trim('"')
         # DSC first execution end
-        & $executionPath -logname=sql-server-deployments -logstatus=$state -logversion=1.0
+        Start-Process $executionPath -ArgumentList 'logusage','-s','ACTION', '-a', $state
     }
 }
 

@@ -111,13 +111,10 @@ Configuration ConfigurationWorkload {
     $dnnPort = '1533'
     $dnnName = "$($Parameters.vmPrefix)-dnn"
 
-    # TODO: Handle scenarios when domain has more than two parts
     $splitResult = $Parameters.domainName.Split('.')
     $domainSLD = $splitResult[0]
-    $domainTLD = ''
-    if ($splitResult.length -gt 1) {
-        $domainTLD  = $splitResult[1]
-    }
+    $domainPath = $Parameters.domainName.Replace('.', ',DC=')
+    $domainPath = 'DC=' + $domainPath
     $localSsdDrive = Get-LocalSsdDrive
     $isLocalSsd = $Parameters.isLocalSsd
     $localSSDNames = $global:localSSDNames
@@ -969,7 +966,7 @@ Configuration ConfigurationWorkload {
             if ($dscBlocks.AddDNNPermission -band $deploymentMask) {
                 ADObjectPermissionEntry 'AddDNNPermission' {
                     Ensure                             = 'Present'
-                    Path                               = "CN=$($Parameters.vmPrefix)-dnn,CN=Computers,DC=$domainSLD,DC=$domainTLD"
+                    Path                               = "CN=$($Parameters.vmPrefix)-dnn,CN=Computers,$domainPath"
                     IdentityReference                  = "$($Parameters.domainName)\$($Parameters.vmPrefix)-cl$"
                     ActiveDirectoryRights              = 'GenericAll'
                     AccessControlType                  = 'Allow'
@@ -1123,7 +1120,7 @@ Configuration ConfigurationWorkload {
             if ($dscBlocks.GrantCNOFullControl -band $deploymentMask) {
                 ADObjectPermissionEntry 'GrantCNOFullControl' {
                     Ensure                             = 'Present'
-                    Path                               = "CN=Computers,DC=$domainSLD,DC=$domainTLD"
+                    Path                               = "CN=Computers,$domainPath"
                     IdentityReference                  = "$($Parameters.domainName)\$($Parameters.vmPrefix)-cl$"
                     ActiveDirectoryRights              = 'GenericAll'
                     AccessControlType                  = 'Allow'

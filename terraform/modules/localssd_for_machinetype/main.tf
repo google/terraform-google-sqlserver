@@ -30,7 +30,7 @@ locals {
       )
     )
   )
-  scratch_disk_count = local.machine_family == "m3" ? local.m3_scratch_disk_count : (local.machine_family == "n2" ? local.n2_scratch_disk_count : 0)
+  scratch_disk_count = local.machine_family == "m3" ? local.m3_scratch_disk_count : ((local.machine_family == "n2" || local.machine_family == "n2d") ? local.n2_scratch_disk_count : 0)
 }
 
 output "count" {

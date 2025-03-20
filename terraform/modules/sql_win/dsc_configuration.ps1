@@ -674,7 +674,7 @@ Configuration ConfigurationWorkload {
                 Script 'InstallCloudSqlAgent' {
                     GetScript = {
                         $result = 'Absent'
-                        $service = Get-Service -Name 'google-cloud-sql-server-agent' -ErrorAction SilentlyContinue
+                        $service = Get-Service -Name 'google-cloud-workload-agent' -ErrorAction SilentlyContinue
                         if ($service.Status -eq 'Running') {
                             $result = 'Present';
                         }

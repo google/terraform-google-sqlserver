@@ -687,7 +687,7 @@ Configuration ConfigurationWorkload {
                     SetScript = {
                         New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{
                             deployment_name = $using:deploymentName
-                            state = 'Begin Google Cloud SQL Server agent installation';
+                            state = 'Begin Google Cloud Agent for Compute Workloads installation';
                             time = (Get-Date).ToString();
                             instance_name = $using:ComputerName;
                         }
@@ -696,7 +696,7 @@ Configuration ConfigurationWorkload {
 
                         New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{
                             deployment_name = $using:deploymentName
-                            state = 'End Google Cloud SQL Server agent installation';
+                            state = 'End Google Cloud Agent for Compute Workloads installation';
                             time = (Get-Date).ToString();
                             instance_name = $using:ComputerName;
                         }

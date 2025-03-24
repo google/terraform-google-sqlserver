@@ -183,21 +183,21 @@ while ($isFirst -eq $true) {
         $dscElapsedSeconds = $dscElapsedTime.TotalSeconds
         if ($dscElapsedSeconds -gt $globalDeploymentTimeout) {
             Log-DscState -state 'playbook_end' -error "Timeout after $globalDeploymentTimeout seconds"
-            Run-PostDeploymentSteps -state 'GlobalTimeout'
+            Run-PostDeploymentSteps -stateName 'GlobalTimeout'
             break
         }
     }
 
     if ($elapsedSeconds -gt $maxLoopDuration) {
         Log-DscState -state 'playbook_end' -error "Timeout after $maxLoopDuration seconds"
-        Run-PostDeploymentSteps -state 'Timeout'
+        Run-PostDeploymentSteps -stateName 'Timeout'
         break
     }
 
     $registryValue = Get-ItemProperty -Path $registryPath -Name $keyName -ErrorAction SilentlyContinue
     if ($registryValue -and $registryValue.InitialConfiguration -eq 1) {
         Log-DscState -state 'playbook_end'
-        Run-PostDeploymentSteps -state 'Success'
+        Run-PostDeploymentSteps -stateName 'Success'
         break
     }
 

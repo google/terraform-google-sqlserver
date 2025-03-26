@@ -157,6 +157,10 @@ function Log-SqlDeploymentUsageMetrics {
         # DSC first execution end
         Start-Process $executionPath -ArgumentList 'logusage','-s','ACTION', '-a', $state
     }
+    else {
+        Write-Host 'Workload agent is not running.'
+        New-GcLogEntry -LogName 'Ansible_logs' -TextPayload 'Workload agent is not running.'
+    }
 }
 
 # Log google cloud SQL server agent metrics and replace the startup script

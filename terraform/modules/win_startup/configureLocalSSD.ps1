@@ -168,7 +168,7 @@ function Run-PostDeploymentSteps {
     param (
       [string] $stateName
     )
-    Log-SqlDeploymentUsageMetrics -state [StatusCode]::$stateName.value__
+    Log-SqlDeploymentUsageMetrics -state ([StatusCode]::$stateName.value__)
     gcloud compute instances add-metadata $nameHost --zone=$zone --metadata ^~^windows-startup-script-ps1=$configureLocalSSD
 }
 

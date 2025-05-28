@@ -276,16 +276,47 @@ Configuration ConfigurationWorkload {
                     }
 
                     $localSSDDrive = $using:localSsdDrive
-                    $physicalDisks = Get-PhysicalDisk | Where-Object {$_.CanPool -eq $true -and $using:localSSDNames -contains $_.FriendlyName} | Select-Object -exp DeviceID | Sort-Object | Get-Unique
+                    try {
+                        $physicalDisks = Get-PhysicalDisk | Where-Object {$_.CanPool -eq $true -and $using:localSSDNames -contains $_.FriendlyName} | Select-Object -exp DeviceID | Sort-Object | Get-Unique
+                    }
+                    catch {
+                        $errorMessage = "Error enumerating physical disks. Error: $($_.Exception.Message)"
+                        $logPayload = @{
+                            deployment_name = $using:deploymentName;
+                            time = (Get-Date).ToString();
+                            instance_name = $using:ComputerName;
+                            dsc_resource  = 'PrepareScratchDisks';
+                            operation = 'GetPhysicalDisksForPooling'
+                            status = 'ERROR';
+                            error_message = $errorMessage;
+                            suggested_remediation = "Verify the user:$($using:domainUserName) has admin rights to query physical disks. Check system event logs."
+                        }
+                        New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload $logPayload
+                        throw $errorMessage
+                    }
                     if (@($physicalDisks).Count -gt 0) {
                         if (@($physicalDisks).Count -gt 1) {
-                            foreach($disk in $physicalDisks) {
-                                @("select disk $($disk)", "online disk noerr", "attributes disk clear readonly", "clean", "convert gpt", "convert dynamic") | diskpart
+                            try {
+                                foreach($disk in $physicalDisks) {
+                                    @("select disk $($disk)", "online disk noerr", "attributes disk clear readonly", "clean", "convert gpt", "convert dynamic") | diskpart
+                                }
+
+                                $disks = $physicalDisks -Join ','
+                                @("create volume stripe disk=$disks", "format fs=ntfs quick unit=64k label=TEMPDB", "assign letter=$localSSDDrive") | diskpart
+                            } catch {
+                                $errorMessage = "Error during diskpart operation: $($_.Exception.Message). This might also indicate an issue with diskpart itself or the commands sent."
+                                New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{
+                                    deployment_name = $using:deploymentName;
+                                    time = (Get-Date).ToString();
+                                    instance_name = $using:ComputerName;
+                                    dsc_resource = 'PrepareScratchDisks';
+                                    operation = 'DiskpartOperation';
+                                    status = 'ERROR';
+                                    error_message = $errorMessage;
+                                    suggested_remediation = 'Review diskpart commands and disk states. Check Disk Management console for errors. Ensure disks were available and not in use.'
+                                }
+                                throw $errorMessage
                             }
-
-                            $disks = $physicalDisks -Join ','
-                            @("create volume stripe disk=$disks", "format fs=ntfs quick unit=64k label=TEMPDB", "assign letter=$localSSDDrive") | diskpart
-
                         }
                         else {
                             # Find the unbooted local SSD
@@ -327,8 +358,23 @@ Configuration ConfigurationWorkload {
                     $acl = Get-ACL $diskName
                     $accessRule= New-Object System.Security.AccessControl.FileSystemAccessRule('everyone','FullControl','ContainerInherit,Objectinherit','none','Allow')
                     $acl.AddAccessRule($accessRule)
-                    # Set folder permission
-                    Set-Acl $diskName $acl
+                    try {
+                        # Set folder permission
+                        Set-Acl $diskName $acl
+                    } catch {
+                        $errorMessage = "Error setting ACL for path '$diskName': $($_.Exception.Message)"
+                        New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{
+                            deployment_name = $using:deploymentName;
+                            times = (Get-Date).ToString();
+                            instance_name = $using:ComputerName;
+                            dsc_resource = 'PrepareScratchDisks';
+                            operation = 'SetACL'
+                            status = 'ERROR';
+                            error_message = $errorMessage;
+                            suggested_remediation = "Verify the user:$($using:domainUserName) has admin rights to modify ACLs on '$diskName'."
+                        }
+                        throw $errorMessage
+                    }
                     New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{
                         deployment_name = $using:deploymentName
                         state = 'End LocalSSD configuration';
@@ -380,8 +426,23 @@ Configuration ConfigurationWorkload {
                     $acl = Get-ACL 'D:'
                     $accessRule= New-Object System.Security.AccessControl.FileSystemAccessRule('everyone','FullControl','ContainerInherit,Objectinherit','none','Allow')
                     $acl.AddAccessRule($accessRule)
-                    # Set folder permission
-                    Set-Acl 'D:' $acl
+                    try {
+                        # Set folder permission
+                        Set-Acl 'D:' $acl
+                    } catch {
+                        $errorMessage = "Error setting ACL for path 'D:': $($_.Exception.Message)"
+                        New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{
+                            deployment_name = $using:deploymentName;
+                            times = (Get-Date).ToString();
+                            instance_name = $using:ComputerName;
+                            dsc_resource = 'PrepareDataDisks';
+                            operation = 'SetACL'
+                            status = 'ERROR';
+                            error_message = $errorMessage;
+                            suggested_remediation = "Verify the user:$($using:domainUserName) has admin rights to modify ACLs on 'D:'."
+                        }
+                        throw $errorMessage
+                    }
                     New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{
                         deployment_name = $using:deploymentName
                         state = 'End data disk configuration';
@@ -433,8 +494,23 @@ Configuration ConfigurationWorkload {
                     $acl = Get-ACL 'E:'
                     $accessRule= New-Object System.Security.AccessControl.FileSystemAccessRule('everyone','FullControl','ContainerInherit,Objectinherit','none','Allow')
                     $acl.AddAccessRule($accessRule)
-                    # Set folder permission
-                    Set-Acl 'E:' $acl
+                    try {
+                        # Set folder permission
+                        Set-Acl 'E:' $acl
+                    } catch {
+                        $errorMessage = "Error setting ACL for path 'E:': $($_.Exception.Message)"
+                        New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{
+                            deployment_name = $using:deploymentName;
+                            times = (Get-Date).ToString();
+                            instance_name = $using:ComputerName;
+                            dsc_resource = 'PrepareLogDisks';
+                            operation = 'SetACL'
+                            status = 'ERROR';
+                            error_message = $errorMessage;
+                            suggested_remediation = "Verify the user:$($using:domainUserName) has admin rights to modify ACLs on 'E:'."
+                        }
+                        throw $errorMessage
+                    }
                     New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{
                         deployment_name = $using:deploymentName
                         state = 'End data disk configuration';
@@ -783,13 +859,29 @@ Configuration ConfigurationWorkload {
                             time = (Get-Date).ToString();
                             instance_name = $using:ComputerName;
                         }
-                       if ($using:osVersion -ge 2019) {
-                            # ManagementPointNetworkType is only available on Windows 2019 and above
-                            New-Cluster -Name ($using:Parameters.vmPrefix+'-cl') -Node $using:node1,$using:node2 `
-                                -ManagementPointNetworkType Distributed -NoStorage;
-                        }
-                        else {
-                            New-Cluster -Name ($using:Parameters.vmPrefix+'-cl') -Node $using:node1,$using:node2 -NoStorage;
+                        try {
+                            if ($using:osVersion -ge 2019) {
+                                # ManagementPointNetworkType is only available on Windows 2019 and above
+                                New-Cluster -Name ($using:Parameters.vmPrefix+'-cl') -Node $using:node1,$using:node2 `
+                                    -ManagementPointNetworkType Distributed -NoStorage;
+                            }
+                            else {
+                                New-Cluster -Name ($using:Parameters.vmPrefix+'-cl') -Node $using:node1,$using:node2 -NoStorage;
+                            }
+                        } catch {
+                            New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{
+                                deployment_name = $using:deploymentName;
+                                time = (Get-Date).ToString();
+                                instance_name = $using:ComputerName;
+                                dsc_resource = 'CreateCluster';
+                                operation = 'New-Cluster';
+                                status = 'ERROR';
+                                error_message = 'Error during creating cluster';
+                                cluster_name_attempted = $clusterName; nodes_attempted = $nodes;
+                                os_version_for_logic = $using:osVersion;
+                                suggested_remediation = 'Verify nodes are online, domain-joined, and resolvable. Check network configuration, permissions, and existing cluster status. Review cluster validation report and system event logs on nodes.';
+                            }
+                            throw $errorMessage
                         }
 
                         New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{
@@ -838,9 +930,52 @@ Configuration ConfigurationWorkload {
                             instance_name = $using:ComputerName;
                         }
 
-                        Test-Cluster
-                        Enable-SqlAlwaysOn -ServerInstance $using:node1 -Force
-                        Enable-SqlAlwaysOn -ServerInstance $using:node2 -Force
+                        try {
+                            Test-Cluster
+                        } catch {
+                            New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{
+                                deployment_name = $using:deploymentName;
+                                times = (Get-Date).ToString();
+                                instance_name = $using:ComputerName;
+                                dsc_resource = 'EnableAOAG';
+                                operation = 'Test-Cluster';
+                                status = 'ERROR';
+                                error_message = "Error during Test-Cluster: $($_.Exception.Message)";
+                                suggested_remediation = 'Review the Test-Cluster report at C:\Windows\Cluster\Reports for more details. Address any validation failures.';
+                            }
+                            throw $errorMessage
+                        }
+
+                        try {
+                            Enable-SqlAlwaysOn -ServerInstance $using:node1 -Force
+                        } catch {
+                            New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{
+                                deployment_name = $using:deploymentName;
+                                time = (Get-Date).ToString();
+                                instance_name = $using:ComputerName;
+                                dsc_resource = 'EnableAOAG';
+                                operation = 'Enable-SqlAlwaysOn';
+                                status = 'ERROR';
+                                error_message = "Error during '$operation' on node1: $($_.Exception.Message)";
+                                suggested_remediation = "Ensure SQL Server instance on this node is running and correctly configured. Verify Failover Clustering is enabled for the SQL service. Check SQL Server error logs, Windows Event Logs, and WMI provider status."
+                            }
+                            throw $errorMessage
+                        }
+                        try {
+                            Enable-SqlAlwaysOn -ServerInstance $using:node2 -Force
+                        } catch {
+                            New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{
+                                deployment_name = $using:deploymentName;
+                                time = (Get-Date).ToString();
+                                instance_name = $using:ComputerName;
+                                dsc_resource = 'EnableAOAG';
+                                operation = 'Enable-SqlAlwaysOn';
+                                status = 'ERROR';
+                                error_message = "Error during '$operation' on node2: $($_.Exception.Message)";
+                                suggested_remediation = "Ensure SQL Server instance on this node is running and correctly configured. Verify Failover Clustering is enabled for the SQL service. Check SQL Server error logs, Windows Event Logs, and WMI provider status."
+                            }
+                            throw $errorMessage
+                        }
 
                         New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{
                             deployment_name = $using:deploymentName
@@ -1232,8 +1367,22 @@ Configuration ConfigurationWorkload {
                             time = (Get-Date).ToString();
                             instance_name = $using:ComputerName;
                         }
-
-                        Add-ClusterResource -Name $using:dnnName -ResourceType 'Distributed Network Name' -Group 'SQL Server (MSSQLSERVER)'
+                        try {
+                            Add-ClusterResource -Name $using:dnnName -ResourceType 'Distributed Network Name' -Group 'SQL Server (MSSQLSERVER)'
+                        }
+                        catch {
+                            $errorMessage = "Error during Add-ClusterResource for DNN '$($using:dnnName)': $($_.Exception.Message)"
+                            New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{
+                                deployment_name = $using:deploymentName;
+                                time = (Get-Date).ToString();
+                                instance_name = $using:ComputerName;
+                                dsc_resource = 'SetupDNNFCI';
+                                status = 'ERROR';
+                                error_message = $errorMessage;
+                                suggested_remediation =
+                                    "Review Failover Clustering event logs (Application Logs -> Microsoft -> Windows -> FailoverClustering) on all cluster nodes for specific errors. Ensure the account $domainUserName running the script has permissions to create and manage cluster resources."
+                            }
+                        }
                         Get-ClusterResource -Name $using:dnnName | Set-ClusterParameter -Name DnsName -Value $using:dnnName
                         Start-ClusterResource -Name $using:dnnName
 

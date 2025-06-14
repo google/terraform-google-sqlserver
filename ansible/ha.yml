@@ -1,0 +1,623 @@
+- name: Fetch Secret from Google Cloud Secret Manager
+  hosts: localhost
+  gather_facts: no
+  vars:
+    pacemaker_secret_name: "{{ pacemaker_secret_name }}"
+    database_key_secret_name: "{{ database_key_secret_name }}"
+    encrytion_key_secret_name: "{{ encrytion_key_secret_name }}"
+    project_id: "{{ project_id }}"
+
+  tasks:
+    - name: Retrieve the pacemaker password from the secret manager
+      ansible.builtin.command: "gcloud secrets versions access latest --secret={{ pacemaker_secret_name }} --project={{ project_id }}"
+      register: pacemaker_password
+      changed_when: false
+      no_log: true
+    - name: Retrieve the database key from the secret manager
+      ansible.builtin.command: "gcloud secrets versions access latest --secret={{ database_key_secret_name }} --project={{ project_id }}"
+      register: database_key
+      changed_when: false
+      no_log: true
+    - name: Retrieve the encryption key from the secret manager
+      ansible.builtin.command: "gcloud secrets versions access latest --secret={{ encrytion_key_secret_name }} --project={{ project_id }}"
+      register: encryption_key
+      changed_when: false
+      no_log: true
+    - name: Set the secrets as global facts
+      ansible.builtin.set_fact:
+        pacemaker_password: "{{ pacemaker_password.stdout }}"
+        database_key: "{{ database_key.stdout }}"
+        encryption_key: "{{ encryption_key.stdout }}"
+        cacheable: no
+      no_log: true
+
+- name: Enable Always On Availability Groups
+  hosts: all
+  become: true
+  tasks:
+    - name: Enable Always On Availability Groups
+      command: "/opt/mssql/bin/mssql-conf set hadr.hadrenabled 1"
+    - name: Restart the mssql-server service
+      service:
+        name: mssql-server
+        state: restarted
+    - name: Wait for 60 seconds to ensure SQL server restarted
+      ansible.builtin.wait_for:
+        timeout: 60
+
+- name: Install Google Cloud CLI on SUSE family systems
+  hosts: all
+  become: true
+  tasks:
+    - name: Download google-cloud-sdk with bundled python
+      ansible.builtin.get_url:
+        url: https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-453.0.0-linux-x86_64.tar.gz
+        dest: /tmp
+        mode: u=rwx,g=rwx,o=r
+      when: ansible_os_family == "Suse"
+
+    - name: Ensure google-cloud-sdk is unpacked
+      ansible.builtin.unarchive:
+        remote_src: true
+        src: /tmp/google-cloud-cli-453.0.0-linux-x86_64.tar.gz
+        dest: /bin
+        mode: u=rw,g=rw,o=r
+      when: ansible_os_family == "Suse"
+
+    - name: Ensure google-cloud-sdk is installed on the machine
+      ansible.builtin.shell: /bin/google-cloud-sdk/install.sh --quiet 1> /var/log/google-cloud-sdk-install.log 2>&1
+      args:
+        executable: /usr/bin/bash
+        creates: /bin/google-cloud-sdk/bin/gsutil
+      when: ansible_os_family == "Suse"
+
+    - name: Ensure gsutil/gcloud is available as a symlink to all users
+      ansible.builtin.file:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        owner: root
+        group: root
+        mode: u=rwx,g=rx,o=rx
+        state: link
+      loop:
+        - { src: "/bin/google-cloud-sdk/bin/gsutil", dest: "/bin/gsutil" }
+        - { src: "/bin/google-cloud-sdk/bin/gcloud", dest: "/bin/gcloud" }
+      when: ansible_os_family == "Suse"
+
+- name: Create an encryption key, certificate, and private key on ha-0
+  hosts: ha-0
+  become: true
+  become_user: root
+  vars:
+    sql_password: "{{ hostvars['localhost']['sql_password'] }}"
+    database_key: "{{ hostvars['localhost']['database_key'] }}"
+    encryption_key: "{{ hostvars['localhost']['encryption_key'] }}"
+    keys_script: >-
+      USE MASTER;
+      CREATE MASTER KEY ENCRYPTION BY PASSWORD = '{{ database_key }}';
+      CREATE CERTIFICATE lxha_ag_certificate WITH SUBJECT = 'lxha_ag_cert';
+      BACKUP CERTIFICATE lxha_ag_certificate
+      TO FILE = '/mnt/disks/mssql/data/lxha_ag_certificate.cer'
+      WITH PRIVATE KEY (
+        FILE = '/mnt/disks/mssql/data/lxha_ag_certificate.pvk',
+        ENCRYPTION BY PASSWORD = '{{ encryption_key }}'
+      )
+    create_database: >-
+      USE MASTER;
+      CREATE DATABASE [bookshelf];
+      ALTER DATABASE [bookshelf] SET RECOVERY FULL;
+      BACKUP DATABASE [bookshelf]
+      TO DISK = N'/mnt/disks/mssql/data/bookshelf.bak';
+    create_endpoint: >-
+      CREATE ENDPOINT [lxha_ag_endpoint]
+      AS TCP (LISTENER_PORT = 5022)
+      FOR DATABASE_MIRRORING (
+      ROLE = ALL,
+      AUTHENTICATION = CERTIFICATE lxha_ag_certificate,
+        ENCRYPTION = REQUIRED ALGORITHM AES
+      );
+      ALTER ENDPOINT [lxha_ag_endpoint] STATE = STARTED;
+    create_aoag_ag1: >-
+      CREATE AVAILABILITY GROUP [aoag1]  WITH (
+      AUTOMATED_BACKUP_PREFERENCE = SECONDARY,
+      DB_FAILOVER = OFF,
+      DTC_SUPPORT = NONE,
+      CLUSTER_TYPE = EXTERNAL,
+      REQUIRED_SYNCHRONIZED_SECONDARIES_TO_COMMIT = 0
+      )
+      FOR DATABASE [bookshelf]
+      REPLICA ON
+        N'{{ node1_name }}' WITH (
+          ENDPOINT_URL = N'TCP://"{{ node1_name }}":5022',
+          FAILOVER_MODE = EXTERNAL,
+          AVAILABILITY_MODE = SYNCHRONOUS_COMMIT,
+          BACKUP_PRIORITY = 50,
+          SEEDING_MODE = AUTOMATIC,
+          SECONDARY_ROLE(ALLOW_CONNECTIONS = NO)),
+        N'{{ node2_name }}' WITH (
+          ENDPOINT_URL = N'TCP://"{{ node2_name }}":5022',
+          FAILOVER_MODE = EXTERNAL,
+          AVAILABILITY_MODE = SYNCHRONOUS_COMMIT,
+          BACKUP_PRIORITY = 50,
+          SEEDING_MODE = AUTOMATIC,
+          SECONDARY_ROLE(ALLOW_CONNECTIONS = NO)),
+        N'{{ node3_name }}' WITH (
+          ENDPOINT_URL = N'TCP://"{{ node3_name }}":5022',
+          FAILOVER_MODE = EXTERNAL,
+          AVAILABILITY_MODE = SYNCHRONOUS_COMMIT,
+          BACKUP_PRIORITY = 50,
+          SEEDING_MODE = AUTOMATIC,
+          SECONDARY_ROLE(ALLOW_CONNECTIONS = NO));
+  tasks:
+    - name: Create an encryption key, certificate, and private key on ha-0
+      ansible.builtin.shell: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '{{ sql_password }}' -Q "{{ keys_script }}" -No
+    - name: Upload certificate into bucket
+      ansible.builtin.command:  "{{ item }}"
+      with_items:
+      - sudo gsutil cp /mnt/disks/mssql/data/lxha_ag_certificate.cer gs://"{{ cert_bucket }}"/
+      - sudo gsutil cp /mnt/disks/mssql/data/lxha_ag_certificate.pvk gs://"{{ cert_bucket }}"/
+    - name: Create a database on ha-0
+      ansible.builtin.shell: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '{{ sql_password }}' -Q "{{ create_database }}" -No
+    - name: Create an endpoint on ha-0
+      ansible.builtin.shell: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '{{ sql_password }}' -Q "{{ create_endpoint }}" -No
+    - name: Create an availability group on ha-0
+      ansible.builtin.shell: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '{{ sql_password }}' -Q "{{ create_aoag_ag1 }}" -No
+
+- name: Create Master key and certificate on ha-1,ha-2
+  hosts: ha-1, ha-2
+  become: true
+  become_user: root
+  vars:
+    sql_password: "{{ hostvars['localhost']['sql_password'] }}"
+    database_key: "{{ hostvars['localhost']['database_key'] }}"
+    encryption_key: "{{ hostvars['localhost']['encryption_key'] }}"
+    keys_transfer: >-
+      USE MASTER;
+      CREATE MASTER KEY ENCRYPTION BY PASSWORD = '{{ database_key }}';
+      CREATE CERTIFICATE lxha_ag_certificate
+      FROM FILE = '/mnt/disks/mssql/data/lxha_ag_certificate.cer'
+      WITH PRIVATE KEY (
+      FILE = '/mnt/disks/mssql/data/lxha_ag_certificate.pvk',
+      DECRYPTION BY PASSWORD = '{{ encryption_key }}'
+      )
+    create_endpoint: >-
+      CREATE ENDPOINT [lxha_ag_endpoint]
+      AS TCP (LISTENER_PORT = 5022)
+      FOR DATABASE_MIRRORING (
+        ROLE = ALL,
+        AUTHENTICATION = CERTIFICATE lxha_ag_certificate,
+        ENCRYPTION = REQUIRED ALGORITHM AES
+      );
+      ALTER ENDPOINT [lxha_ag_endpoint] STATE = STARTED;
+    add_to_aoag1: >-
+      ALTER AVAILABILITY GROUP [aoag1] JOIN WITH (CLUSTER_TYPE = EXTERNAL);
+      ALTER AVAILABILITY GROUP [aoag1] GRANT CREATE ANY DATABASE;
+  tasks:
+  - name: Download certificate
+    ansible.builtin.command:  "{{ item }}"
+    with_items:
+      - sudo gsutil cp gs://"{{ cert_bucket }}"/lxha_ag_certificate.cer /mnt/disks/mssql/data/
+      - sudo gsutil cp gs://"{{ cert_bucket }}"/lxha_ag_certificate.pvk /mnt/disks/mssql/data/
+  - name: Change owner and mode for certificate
+    ansible.builtin.command:  "{{ item }}"
+    with_items:
+      - sudo chown mssql:mssql /mnt/disks/mssql/data/lxha_ag_certificate.cer
+      - sudo chmod 660 /mnt/disks/mssql/data/lxha_ag_certificate.cer
+      - sudo chown mssql:mssql /mnt/disks/mssql/data/lxha_ag_certificate.pvk
+      - sudo chmod 660 /mnt/disks/mssql/data/lxha_ag_certificate.pvk
+  - name: Create the certificate on ha-1,ha-2 from the downloaded files
+    ansible.builtin.shell: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '{{ sql_password }}' -Q "{{ keys_transfer }}" -No
+  - name: Create an endpoint on lxha-1 and lxha-2
+    ansible.builtin.shell: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '{{ sql_password }}' -Q "{{ create_endpoint }}" -No
+  - name: Add the nodes to the availability group
+    ansible.builtin.shell: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '{{ sql_password }}' -Q "{{ add_to_aoag1 }}" -No
+
+- name: Configure common sets for all nodes in  pacemaker cluster
+  hosts: ha-0, ha-1, ha-2
+  become: true
+  vars:
+    sql_password: "{{ hostvars['localhost']['sql_password'] }}"
+    pacemaker_password: "{{ hostvars['localhost']['pacemaker_password'] }}"
+  tasks:
+    - name: Update apt cache for Debian/Ubuntu systems
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+    - name: Update dnf cache for Red Hat family systems (RHEL 8+, Fedora)
+      ansible.builtin.dnf:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+    - name: Update zypper cache for SUSE family systems
+      ansible.builtin.shell: sudo zypper refresh
+      when: ansible_os_family == "Suse"
+   # TODO: Add support for RHEL and SUSE
+    - name: Install cluster software on Debian/Ubuntu systems
+      ansible.builtin.package:
+        name:
+          - pacemaker
+          - pacemaker-cli-utils
+          - crmsh
+          - resource-agents
+          - fence-agents
+          - corosync
+          - python3-azure
+          - pcs
+        state: present
+      when: ansible_os_family == "Debian"
+    - name: Install cluster software on Red Hat family systems
+      ansible.builtin.yum:
+        name:
+          - pacemaker
+          - pcs
+          - fence-agents-all
+          - corosync
+        state: present
+      when: ansible_os_family == "RedHat"
+    - name: Install cluster software on SUSE family systems
+      ansible.builtin.zypper:
+        name:
+          - pacemaker
+          - fence-agents
+          - corosync
+        state: present
+      when: ansible_os_family == "Suse"
+    - name: Set password for hacluster user
+      ansible.builtin.user:
+        name: hacluster
+        password: "{{ pacemaker_password | password_hash('sha512')}}"
+    - name: Configure a SQL Server login for the pacemaker
+      block:
+        - name: Run query to Create a SQL Server login for the pacemaker
+          community.general.mssql_script:
+            login_user: "sa"
+            login_password: "{{ sql_password }}"
+            login_host: "{{ ansible_host }}"
+            db: "master"
+            script:  |
+              CREATE LOGIN [pacemaker] with PASSWORD= N'{{ pacemaker_password }}';
+              ALTER SERVER ROLE [sysadmin] ADD MEMBER [pacemaker];
+        - name: grant the pacemaker login permissions to the availability group
+          community.general.mssql_script:
+            login_user: "sa"
+            login_password: "{{ sql_password }}"
+            login_host: "{{ ansible_host }}"
+            db: "master"
+            script:  |
+              GRANT ALTER, CONTROL, VIEW DEFINITION ON AVAILABILITY GROUP::[aoag1] TO [pacemaker];
+              GRANT VIEW SERVER STATE TO [pacemaker];
+              GO
+        - name: Save the Pacemaker login and password in the SQL Server secrets folder
+          ansible.builtin.shell: "{{ item }}"
+          with_items:
+            - sudo echo 'pacemaker' >> ~/pacemaker-passwd
+            - sudo echo '{{ pacemaker_password }}' >> ~/pacemaker-passwd
+            - sudo mv ~/pacemaker-passwd /var/opt/mssql/secrets/passwd
+            - sudo chown root:root /var/opt/mssql/secrets/passwd
+            - sudo chmod 400 /var/opt/mssql/secrets/passwd
+        - name: Install SQL Server resource agent for integration with Pacemaker
+          package:
+            name:
+              - mssql-server-ha
+            state: present
+        - name: Restart the SQL Server
+          service:
+            name: mssql-server
+            state: restarted
+        - name: Install HAProxy tcp listener
+          package:
+            name: haproxy
+            state: present
+        - name:  Append the following section at the end of the haproxy.cfg file
+          ansible.builtin.blockinfile:
+            path: /etc/haproxy/haproxy.cfg
+            block: |
+              #---------------------------------------------------------------
+              # Set up health check listener for SQL Server Availability Group
+              #---------------------------------------------------------------
+              listen healthcheck
+              bind *:60011
+        - name: Start HAProxy service and confirm configuration
+          ansible.builtin.command:  "{{ item }}"
+          with_items:
+            - sudo systemctl start haproxy.service
+            - sudo systemctl enable haproxy.service
+            - sudo systemctl restart haproxy.service
+            - sudo systemctl status haproxy.service
+
+- name: Configure Coronsync pacemaker cluster for ha-0
+  hosts: ha-0
+  become: true
+  tasks:
+    - name: Generate cluster authentication key
+      ansible.builtin.command: sudo corosync-keygen
+    - name: Upload corosync certificate into bucket
+      ansible.builtin.command: sudo gsutil cp /etc/corosync/authkey gs://"{{ cert_bucket }}"/
+    - name: Clear /etc/corosync/corosync.conf
+      ansible.builtin.shell: sudo cat /dev/null > /etc/corosync/corosync.conf
+    - name: Create Corosync log file
+      ansible.builtin.shell: sudo mkdir -p /var/log/corosync
+      when: ansible_os_family == "RedHat" or ansible_os_family == "Suse"
+    - name: Create the cluster, edit the /etc/corosync/corosync.conf file on ha-0
+      ansible.builtin.blockinfile:
+        path: /etc/corosync/corosync.conf
+        block: |
+          totem {
+              version: 2
+              cluster_name: sql_cl
+              transport: udpu
+              crypto_cipher: none
+              crypto_hash: none
+          }
+          logging {
+              fileline: off
+              to_stderr: yes
+              to_logfile: yes
+              logfile: /var/log/corosync/corosync.log
+              to_syslog: yes
+              debug: off
+              logger_subsys {
+                  subsys: QUORUM
+                  debug: off
+              }
+          }
+          quorum {
+              provider: corosync_votequorum
+          }
+          nodelist {
+              node {
+                  name: {{ node1_name }}
+                  nodeid: 1
+                  ring0_addr: {{ hostvars['ha-0']['ansible_default_ipv4']['address'] }}
+              }
+              node {
+                  name: {{ node2_name }}
+                  nodeid: 2
+                  ring0_addr: {{ hostvars['ha-1']['ansible_default_ipv4']['address'] }}
+              }
+              node {
+                  name: {{ node3_name }}
+                  nodeid: 3
+                  ring0_addr: {{ hostvars['ha-2']['ansible_default_ipv4']['address'] }}
+              }
+          }
+    - name: Upload corosync.conf into bucket
+      ansible.builtin.command: sudo gsutil cp /etc/corosync/corosync.conf gs://"{{ cert_bucket }}"/
+    - name: Restart the corosync services
+      service:
+        name: corosync
+        state: restarted
+    - name: Restart the pacemaker services
+      service:
+        name: pacemaker
+        state: restarted
+
+- name: Configure pacemaker cluster on ha-1 and ha-2
+  hosts: ha-1, ha-2
+  become: true
+  tasks:
+    - name: Create Corosync log file
+      ansible.builtin.shell: sudo mkdir -p /var/log/corosync
+      when: ansible_os_family == "RedHat" or ansible_os_family == "Suse"
+    - name: Download corosync certificate
+      ansible.builtin.command: sudo gsutil cp gs://"{{ cert_bucket }}"/authkey /etc/corosync
+    - name: Download corosync.conf
+      ansible.builtin.command: sudo gsutil cp gs://"{{ cert_bucket }}"/corosync.conf /etc/corosync
+    - name: Change mode for authkey and /etc/corosync/corosync.conf
+      ansible.builtin.shell:   "{{ item }}"
+      with_items:
+        - sudo chmod 400 /etc/corosync/authkey
+        - sudo chmod 400 /etc/corosync/corosync.conf
+    - name: Restart the pacemaker services
+      service:
+        name: pacemaker
+        state: restarted
+    - name: Restart the corosync services
+      service:
+        name: corosync
+        state: restarted
+    - name: Confirm the status of cluster and verify the configuration
+      ansible.builtin.shell: sudo crm status
+
+- name: Set up the Cluster
+  hosts: ha-0
+  become: true
+  vars:
+    sql_password: "{{ hostvars['localhost']['sql_password'] }}"
+    pacemaker_password: "{{ hostvars['localhost']['pacemaker_password'] }}"
+  tasks:
+    - name: Configure CRM cluster
+      ansible.builtin.command:  "{{ item }}"
+      with_items:
+        - sudo crm configure property stonith-enabled=false
+        - sudo crm configure property cluster-recheck-interval=2min
+        - sudo crm configure property start-failure-is-fatal=true
+    - name: Authorize hacluster user
+      ansible.builtin.command: sudo pcs cluster auth -u hacluster -p "{{ pacemaker_password }}"
+      when: ansible_os_family == "RedHat" or ansible_os_family == "Ubuntu"
+    - name: Configure CRM cluster resources
+      ansible.builtin.command: sh /tmp/crm_config.sh
+    - name: Wait for 120 seconds to ensure the node is promoted
+      ansible.builtin.wait_for:
+        timeout: 120
+    - name: Confirm the status of cluster and verify the configuration
+      ansible.builtin.shell: sudo crm status
+    - name: Create a health check resource for the HAProxy service in your pacemaker cluster
+      ansible.builtin.command:  "{{ item }}"
+      with_items:
+        - sudo pcs resource create pcs-healthcheck service:haproxy op monitor interval=10s timeout=20s
+        - sudo crm status
+      when: ansible_os_family == "RedHat" or ansible_os_family == "Ubuntu"
+    - name: Move a health check resource for the HAProxy service in your pacemaker cluster
+      ansible.builtin.command: "{{ item }}"
+      with_items:
+        - sudo pcs resource move pcs-healthcheck "{{ node1_name }}"
+        - sudo pcs resource clear pcs-healthcheck
+        - sudo crm status
+      ignore_errors: true
+      when: ansible_os_family == "RedHat" or ansible_os_family == "Ubuntu"
+    - name: Create the virtual IP address pacemaker resource
+      ansible.builtin.command:  sudo pcs resource create pcs-cluster-vip ocf:heartbeat:IPaddr2 ip="{{ cluster_ip }}" nic="{{ ansible_facts['default_ipv4']['interface'] }}" cidr_netmask=32 op monitor interval=3600s timeout=60s
+      when: ansible_os_family == "RedHat" or ansible_os_family == "Ubuntu"
+    - name: Create crm healthcheck file
+      ansible.builtin.file:
+        path: /tmp/crm_haproxy_healthcheck.sh
+        state: touch
+        mode: '0755'
+      when: ansible_os_family == "Suse"
+    - name: Create crm_haproxy_healthcheck.sh script
+      ansible.builtin.blockinfile:
+        path: /tmp/crm_haproxy_healthcheck.sh
+        block: |
+          #!/bin/bash
+          sudo crm configure <<EOF
+          primitive pcs-healthcheck systemd:haproxy \\
+              op monitor interval=10s timeout=20s
+          primitive pcs-cluster-vip ocf:heartbeat:IPaddr2 \
+              params ip="{{ cluster_ip }}" nic="{{ ansible_facts['default_ipv4']['interface'] }}" cidr_netmask="32" \
+              op monitor interval=3600s timeout=60s
+          commit
+          EOF
+        mode: '0755'
+      when: ansible_os_family == "Suse"
+    - name: Configure CRM cluster resources
+      ansible.builtin.command: sh /tmp/crm_haproxy_healthcheck.sh
+      when: ansible_os_family == "Suse"
+    - name: Check cluster resources
+      ansible.builtin.command: sudo crm status
+    - name: Move VIP to primary node
+      ansible.builtin.command: sudo pcs resource move pcs-cluster-vip "{{ node1_name }}"
+      ignore_errors: true
+      when: ansible_os_family == "RedHat" or ansible_os_family == "Ubuntu"
+    - name: Move VIP to primary node for SUSE
+      ansible.builtin.command: |
+        sudo crm configure location move-pcs-cluster-vip pcs-cluster-vip INFINITY: "{{ node1_name }}"
+      ignore_errors: true
+      when: ansible_os_family == "Suse"
+    - name: Group the health check and virtual IP address resources together
+      ansible.builtin.command: sudo pcs resource group add pcs-group pcs-healthcheck pcs-cluster-vip
+      when: ansible_os_family == "RedHat" or ansible_os_family == "Ubuntu"
+    - name: Group the health check and virtual IP address resources together for SUSE
+      ansible.builtin.command: |
+        sudo crm configure group pcs-group pcs-healthcheck pcs-cluster-vip
+      when: ansible_os_family == "Suse"
+    - name: Check cluster resources
+      ansible.builtin.command: sudo crm status
+    - name: Create a constraint that locates the new group on the same node as the primary
+      ansible.builtin.command: sudo pcs constraint colocation add master pcs-group with master ms-ag1 score=INFINITY
+      when: ansible_os_family == "RedHat" or ansible_os_family == "Ubuntu"
+    - name: Create a constraint that locates the new group on the same node as the primary for SUSE
+      ansible.builtin.command: |
+        sudo crm configure colocation pcs-group-with-ms-ag1 INFINITY: ms-ag1:Master pcs-group
+      when: ansible_os_family == "Suse"
+    - name: Create a listener for your SQL Server availability group
+      community.general.mssql_script:
+         login_user: "sa"
+         login_password: "{{ sql_password }}"
+         login_host: "{{ node1_name }}"
+         db: "master"
+         script:  |
+           ALTER AVAILABILITY GROUP aoag1
+           ADD LISTENER 'aoag1-listener' (
+           WITH IP (('{{ cluster_ip }}','255.255.255.0')), PORT=1433
+           )
+    - name: Check if the fence_gce
+      ansible.builtin.shell: sudo pcs stonith list | grep fence_gce
+      when: ansible_os_family == "RedHat" or ansible_os_family == "Ubuntu"
+    - name: Check if the fence_gce for SUSE
+      ansible.builtin.shell: sudo crm ra list stonith | grep fence_gce
+      when: ansible_os_family == "Suse"
+    - name: Create the fence_gce fencing type resources for lxha-0
+      ansible.builtin.command: sudo pcs stonith create "{{ node1_name }}"-fence fence_gce plug="{{ node1_name }}" zone="{{ zone1_name }}" project="{{ project_id }}" pcmk_reboot_timeout=300 pcmk_monitor_retries=4 pcmk_delay_max=30 op monitor interval="300s" timeout="120s" op start interval="0" timeout="60s"
+      when: ansible_os_family == "RedHat" or ansible_os_family == "Ubuntu"
+    - name: Create the fence_gce fencing type resources for lxha-0 for SUSE
+      ansible.builtin.command: |
+        sudo crm configure primitive "{{ node1_name }}"-fence stonith:fence_gce \
+        params plug="{{ node1_name }}" zone="{{ zone1_name }}" project="{{ project_id }}" \
+        pcmk_reboot_timeout="300" pcmk_monitor_retries="4" pcmk_delay_max="30" \
+        op monitor interval="300s" timeout="120s" \
+        op start interval="0" timeout="60s"
+      when: ansible_os_family == "Suse"
+    - name: Create the fence_gce fencing type resources for lxha-1
+      ansible.builtin.command: sudo pcs stonith create "{{ node2_name }}"-fence fence_gce plug="{{ node2_name }}" zone="{{ zone2_name }}" project="{{ project_id }}" pcmk_reboot_timeout=300 pcmk_monitor_retries=4 pcmk_delay_max=30 op monitor interval="300s" timeout="120s" op start interval="0" timeout="60s"
+      when: ansible_os_family == "RedHat" or ansible_os_family == "Ubuntu"
+    - name: Create the fence_gce fencing type resources for lxha-1 for SUSE
+      ansible.builtin.command: |
+        sudo crm configure primitive "{{ node2_name }}"-fence stonith:fence_gce \
+        params plug="{{ node2_name }}" zone="{{ zone2_name }}" project="{{ project_id }}" \
+        pcmk_reboot_timeout="300" pcmk_monitor_retries="4" pcmk_delay_max="30" \
+        op monitor interval="300s" timeout="120s" \
+        op start interval="0" timeout="60s"
+      when: ansible_os_family == "Suse"
+    - name: Create the fence_gce fencing type resources for lxha-2
+      ansible.builtin.command: sudo pcs stonith create "{{ node3_name }}"-fence fence_gce plug="{{ node3_name }}" zone="{{ zone3_name }}" project="{{ project_id }}" pcmk_reboot_timeout=300 pcmk_monitor_retries=4 pcmk_delay_max=30 op monitor interval="300s" timeout="120s" op start interval="0" timeout="60s"
+      when: ansible_os_family == "RedHat" or ansible_os_family == "Ubuntu"
+    - name: Create the fence_gce fencing type resources for lxha-2 for SUSE
+      ansible.builtin.command: |
+        sudo crm configure primitive "{{ node3_name }}"-fence stonith:fence_gce \
+        params plug="{{ node3_name }}" zone="{{ zone3_name }}" project="{{ project_id }}" \
+        pcmk_reboot_timeout="300" pcmk_monitor_retries="4" pcmk_delay_max="30" \
+        op monitor interval="300s" timeout="120s" \
+        op start interval="0" timeout="60s"
+      when: ansible_os_family == "Suse"
+    - name: Wait for 120 seconds to ensure the fence resources started
+      ansible.builtin.wait_for:
+        timeout: 120
+    - name: Create location constraints for your fencing devices to ensure that they are running only on the intended instances
+      ansible.builtin.command: "{{ item }}"
+      with_items:
+        - sudo pcs constraint location "{{ node1_name }}"-fence avoids "{{ node1_name }}"
+        - sudo pcs constraint location "{{ node2_name }}"-fence avoids "{{ node2_name }}"
+        - sudo pcs constraint location "{{ node3_name }}"-fence avoids "{{ node3_name }}"
+      when: ansible_os_family == "RedHat" or ansible_os_family == "Ubuntu"
+    - name: Create location constraints for your fencing devices to ensure that they are running only on the intended instances for SUSE
+      ansible.builtin.command: "{{ item }}"
+      with_items:
+        - |
+          sudo crm configure location "{{ node1_name }}"-fence-avoid "{{ node1_name }}"-fence -INFINITY: "{{ node1_name }}"
+        - |
+          sudo crm configure location "{{ node2_name }}"-fence-avoid "{{ node2_name }}"-fence -INFINITY: "{{ node2_name }}"
+        - |
+          sudo crm configure location "{{ node3_name }}"-fence-avoid "{{ node3_name }}"-fence -INFINITY: "{{ node3_name }}"
+      when: ansible_os_family == "Suse"
+    - name: Enable fencing in your pacemaker cluster and set the cluster fencing timeout
+      ansible.builtin.command: "{{ item }}"
+      with_items:
+        - sudo pcs -f stonith_cfg property set stonith-enabled=true
+        - sudo pcs property set stonith-timeout="300s"
+      when: ansible_os_family == "RedHat" or ansible_os_family == "Ubuntu"
+    - name: Enable fencing in your pacemaker cluster and set the cluster fencing timeout for SUSE
+      ansible.builtin.command: "{{ item }}"
+      with_items:
+        - sudo crm configure property stonith-enabled=true
+        - sudo crm configure property stonith-timeout="300s"
+      when: ansible_os_family == "Suse"
+    - name: Check cluster resources
+      ansible.builtin.command: sudo crm status
+
+- name: Configure Corosync for delayed restart
+  hosts: sql
+  become: true
+  tasks:
+    - name: Create systemd drop-in directory for corosync.service
+      ansible.builtin.file:
+        path: /etc/systemd/system/corosync.service.d
+        state: directory
+        mode: '0755'
+    - name: Create systemd drop-in file for corosync.service
+      ansible.builtin.file:
+        path: /etc/systemd/system/corosync.service.d/delay-start.conf
+        state: touch
+        mode: '0644'
+    - name: Create drop-in file with start delay
+      ansible.builtin.blockinfile:
+        path: /etc/systemd/system/corosync.service.d/delay-start.conf
+        block: |
+          [Service]
+          ExecStartPre=/bin/sleep 60
+        mode: '0644'
+    - name: Reload the service manager and check if the configuration is taken into account
+      ansible.builtin.command:  "{{ item }}"
+      with_items:
+        - sudo systemctl daemon-reload
+        - sudo systemctl status corosync.service --no-pager

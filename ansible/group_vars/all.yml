@@ -1,0 +1,20 @@
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Ansible execution parameters
+ansible_ssh_pipelining: true
+ansible_ssh_executable: "/tmp/misc/gcp-ssh-wrapper.sh"
+ansible_ssh_args: --zone={{ gce_instance_zone }} --project={{ gce_instance_project }}  --no-user-output-enabled --quiet -tt
+ansible_scp_if_ssh: true
+ansible_python_interpreter: /usr/bin/python3

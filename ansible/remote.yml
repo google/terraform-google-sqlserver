@@ -206,30 +206,39 @@
               USE master;
               ALTER DATABASE tempdb MODIFY FILE (NAME = tempdev, FILENAME = '{{ ssd_name }}/tempdb.mdf');
               ALTER DATABASE tempdb MODIFY FILE (NAME = templog, FILENAME = '{{ ssd_name }}/templog.ldf');
+          when: is_local_ssd == "true"
+
+        - name: Change file ownership
+          command: sudo chown mssql:mssql -R /var/opt/mssql
 
         - name: Restart the SQL Server
           ansible.builtin.systemd_service:
             name: mssql-server
             state: restarted
 
-    - name: Wait for 60 seconds to ensure SQL server restarted
-      ansible.builtin.wait_for:
-        timeout: 60
-    - name: Create Check_DB
-      community.general.mssql_script:
-        login_user: "sa"
-        login_password: "{{ sql_password }}"
-        login_host: "{{ ansible_host }}"
-        script: |
-          USE MASTER;
-          CREATE DATABASE [check_db];
-          ALTER DATABASE [check_db] SET RECOVERY FULL;
-          BACKUP DATABASE [check_db] TO DISK = N'/mnt/disks/mssql/data/check_db.bak';
-    - name: Verify tempdb location
-      shell: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '{{ sql_password }}' -Q "SELECT name, physical_name FROM sys.master_files WHERE database_id = DB_ID(N'tempdb');" -No
-      register: tempdb_result
-      failed_when: 'ssd_name | string not in tempdb_result.stdout'
-      when: is_local_ssd == "true"
+        - name: Wait for 60 seconds to ensure SQL server restarted
+          ansible.builtin.wait_for:
+            timeout: 60
+
+        - name: Get SQL Server State
+          ansible.builtin.command: systemctl status mssql-server
+
+        - name: Create Check_DB
+          community.general.mssql_script:
+            login_user: "sa"
+            login_password: "{{ sql_password }}"
+            login_host: "{{ ansible_host }}"
+            script: |
+              USE MASTER;
+              CREATE DATABASE [check_db];
+              ALTER DATABASE [check_db] SET RECOVERY FULL;
+              BACKUP DATABASE [check_db] TO DISK = N'/mnt/disks/mssql/data/check_db.bak';
+
+        - name: Verify tempdb location
+          shell: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '{{ sql_password }}' -Q "SELECT name, physical_name FROM sys.master_files WHERE database_id = DB_ID(N'tempdb');" -No
+          register: tempdb_result
+          failed_when: 'ssd_name | string not in tempdb_result.stdout'
+          when: is_local_ssd == "true"
 
 - when: is_ha == "true"
   import_playbook: ha.yml

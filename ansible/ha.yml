@@ -154,8 +154,8 @@
     - name: Upload certificate into bucket
       ansible.builtin.command:  "{{ item }}"
       with_items:
-      - sudo gsutil cp /mnt/disks/mssql/data/lxha_ag_certificate.cer gs://"{{ cert_bucket }}"/
-      - sudo gsutil cp /mnt/disks/mssql/data/lxha_ag_certificate.pvk gs://"{{ cert_bucket }}"/
+      - sudo gcloud storage cp /mnt/disks/mssql/data/lxha_ag_certificate.cer gs://"{{ cert_bucket }}"/
+      - sudo gcloud storage cp /mnt/disks/mssql/data/lxha_ag_certificate.pvk gs://"{{ cert_bucket }}"/
     - name: Create a database on ha-0
       ansible.builtin.shell: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '{{ sql_password }}' -Q "{{ create_database }}" -No
     - name: Create an endpoint on ha-0
@@ -196,8 +196,8 @@
   - name: Download certificate
     ansible.builtin.command:  "{{ item }}"
     with_items:
-      - sudo gsutil cp gs://"{{ cert_bucket }}"/lxha_ag_certificate.cer /mnt/disks/mssql/data/
-      - sudo gsutil cp gs://"{{ cert_bucket }}"/lxha_ag_certificate.pvk /mnt/disks/mssql/data/
+      - sudo gcloud storage cp gs://"{{ cert_bucket }}"/lxha_ag_certificate.cer /mnt/disks/mssql/data/
+      - sudo gcloud storage cp gs://"{{ cert_bucket }}"/lxha_ag_certificate.pvk /mnt/disks/mssql/data/
   - name: Change owner and mode for certificate
     ansible.builtin.command:  "{{ item }}"
     with_items:
@@ -332,7 +332,7 @@
     - name: Generate cluster authentication key
       ansible.builtin.command: sudo corosync-keygen
     - name: Upload corosync certificate into bucket
-      ansible.builtin.command: sudo gsutil cp /etc/corosync/authkey gs://"{{ cert_bucket }}"/
+      ansible.builtin.command: sudo gcloud storage cp /etc/corosync/authkey gs://"{{ cert_bucket }}"/
     - name: Clear /etc/corosync/corosync.conf
       ansible.builtin.shell: sudo cat /dev/null > /etc/corosync/corosync.conf
     - name: Create Corosync log file
@@ -382,7 +382,7 @@
               }
           }
     - name: Upload corosync.conf into bucket
-      ansible.builtin.command: sudo gsutil cp /etc/corosync/corosync.conf gs://"{{ cert_bucket }}"/
+      ansible.builtin.command: sudo gcloud storage cp /etc/corosync/corosync.conf gs://"{{ cert_bucket }}"/
     - name: Restart the corosync services
       service:
         name: corosync
@@ -400,9 +400,9 @@
       ansible.builtin.shell: sudo mkdir -p /var/log/corosync
       when: ansible_os_family == "RedHat" or ansible_os_family == "Suse"
     - name: Download corosync certificate
-      ansible.builtin.command: sudo gsutil cp gs://"{{ cert_bucket }}"/authkey /etc/corosync
+      ansible.builtin.command: sudo gcloud storage cp gs://"{{ cert_bucket }}"/authkey /etc/corosync
     - name: Download corosync.conf
-      ansible.builtin.command: sudo gsutil cp gs://"{{ cert_bucket }}"/corosync.conf /etc/corosync
+      ansible.builtin.command: sudo gcloud storage cp gs://"{{ cert_bucket }}"/corosync.conf /etc/corosync
     - name: Change mode for authkey and /etc/corosync/corosync.conf
       ansible.builtin.shell:   "{{ item }}"
       with_items:

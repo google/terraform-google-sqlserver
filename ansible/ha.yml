@@ -152,10 +152,24 @@
     - name: Create an encryption key, certificate, and private key on ha-0
       ansible.builtin.shell: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '{{ sql_password }}' -Q "{{ keys_script }}" -No
     - name: Upload certificate into bucket
-      ansible.builtin.command:  "{{ item }}"
+      ansible.builtin.command: "{{ item }}"
       with_items:
-      - sudo gsutil cp /mnt/disks/mssql/data/lxha_ag_certificate.cer gs://"{{ cert_bucket }}"/
-      - sudo gsutil cp /mnt/disks/mssql/data/lxha_ag_certificate.pvk gs://"{{ cert_bucket }}"/
+        # Note: gcloud storage cp performs parallel uploads and downloads by default for improved performance. gsutil requires the top-level -m flag to enable this behavior.
+        # Note: gcloud storage does not support parallel invocations (running the CLI from multiple terminals at the same time), which can lead to flaky behaviour.
+        # Note: Folders created via the Cloud Console are 0-byte placeholder objects. gcloud storage cp copies these placeholders, while gsutil is designed to skip them.
+        # Note: There are several known issues where gsutil cp -I behaves differently than gcloud storage cp --read-paths-from-stdin, particularly around not copying entire directories or not detecting all files specified in the input.
+        # Note: gcloud storage cp will attempt to copy all valid sources even if one of the specified sources is invalid. In contrast, gsutil cp may halt the entire operation if an early source argument is invalid.
+        # Note: When downloading an object, gcloud storage cp will create any missing local directories in the destination path. gsutil cp will fail if the destination directory does not exist.
+        # Note: Gcloud Storage is meant as a tool to work with GCS (cloud). So it does not support local copying (where both source and destination are local files/folders). Trying to use the tool this way will cause an error.
+        - sudo gcloud storage cp /mnt/disks/mssql/data/lxha_ag_certificate.cer gs://"{{ cert_bucket }}"/
+        # Note: gcloud storage cp performs parallel uploads and downloads by default for improved performance. gsutil requires the top-level -m flag to enable this behavior.
+        # Note: gcloud storage does not support parallel invocations (running the CLI from multiple terminals at the same time), which can lead to flaky behaviour.
+        # Note: Folders created via the Cloud Console are 0-byte placeholder objects. gcloud storage cp copies these placeholders, while gsutil is designed to skip them.
+        # Note: There are several known issues where gsutil cp -I behaves differently than gcloud storage cp --read-paths-from-stdin, particularly around not copying entire directories or not detecting all files specified in the input.
+        # Note: gcloud storage cp will attempt to copy all valid sources even if one of the specified sources is invalid. In contrast, gsutil cp may halt the entire operation if an early source argument is invalid.
+        # Note: When downloading an object, gcloud storage cp will create any missing local directories in the destination path. gsutil cp will fail if the destination directory does not exist.
+        # Note: Gcloud Storage is meant as a tool to work with GCS (cloud). So it does not support local copying (where both source and destination are local files/folders). Trying to use the tool this way will cause an error.
+        - sudo gcloud storage cp /mnt/disks/mssql/data/lxha_ag_certificate.pvk gs://"{{ cert_bucket }}"/
     - name: Create a database on ha-0
       ansible.builtin.shell: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '{{ sql_password }}' -Q "{{ create_database }}" -No
     - name: Create an endpoint on ha-0
@@ -193,24 +207,38 @@
       ALTER AVAILABILITY GROUP [aoag1] JOIN WITH (CLUSTER_TYPE = EXTERNAL);
       ALTER AVAILABILITY GROUP [aoag1] GRANT CREATE ANY DATABASE;
   tasks:
-  - name: Download certificate
-    ansible.builtin.command:  "{{ item }}"
-    with_items:
-      - sudo gsutil cp gs://"{{ cert_bucket }}"/lxha_ag_certificate.cer /mnt/disks/mssql/data/
-      - sudo gsutil cp gs://"{{ cert_bucket }}"/lxha_ag_certificate.pvk /mnt/disks/mssql/data/
-  - name: Change owner and mode for certificate
-    ansible.builtin.command:  "{{ item }}"
-    with_items:
-      - sudo chown mssql:mssql /mnt/disks/mssql/data/lxha_ag_certificate.cer
-      - sudo chmod 660 /mnt/disks/mssql/data/lxha_ag_certificate.cer
-      - sudo chown mssql:mssql /mnt/disks/mssql/data/lxha_ag_certificate.pvk
-      - sudo chmod 660 /mnt/disks/mssql/data/lxha_ag_certificate.pvk
-  - name: Create the certificate on ha-1,ha-2 from the downloaded files
-    ansible.builtin.shell: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '{{ sql_password }}' -Q "{{ keys_transfer }}" -No
-  - name: Create an endpoint on lxha-1 and lxha-2
-    ansible.builtin.shell: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '{{ sql_password }}' -Q "{{ create_endpoint }}" -No
-  - name: Add the nodes to the availability group
-    ansible.builtin.shell: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '{{ sql_password }}' -Q "{{ add_to_aoag1 }}" -No
+    - name: Download certificate
+      ansible.builtin.command: "{{ item }}"
+      with_items:
+        # Note: gcloud storage cp performs parallel uploads and downloads by default for improved performance. gsutil requires the top-level -m flag to enable this behavior.
+        # Note: gcloud storage does not support parallel invocations (running the CLI from multiple terminals at the same time), which can lead to flaky behaviour.
+        # Note: Folders created via the Cloud Console are 0-byte placeholder objects. gcloud storage cp copies these placeholders, while gsutil is designed to skip them.
+        # Note: There are several known issues where gsutil cp -I behaves differently than gcloud storage cp --read-paths-from-stdin, particularly around not copying entire directories or not detecting all files specified in the input.
+        # Note: gcloud storage cp will attempt to copy all valid sources even if one of the specified sources is invalid. In contrast, gsutil cp may halt the entire operation if an early source argument is invalid.
+        # Note: When downloading an object, gcloud storage cp will create any missing local directories in the destination path. gsutil cp will fail if the destination directory does not exist.
+        # Note: Gcloud Storage is meant as a tool to work with GCS (cloud). So it does not support local copying (where both source and destination are local files/folders). Trying to use the tool this way will cause an error.
+        - sudo gcloud storage cp gs://"{{ cert_bucket }}"/lxha_ag_certificate.cer /mnt/disks/mssql/data/
+        # Note: gcloud storage cp performs parallel uploads and downloads by default for improved performance. gsutil requires the top-level -m flag to enable this behavior.
+        # Note: gcloud storage does not support parallel invocations (running the CLI from multiple terminals at the same time), which can lead to flaky behaviour.
+        # Note: Folders created via the Cloud Console are 0-byte placeholder objects. gcloud storage cp copies these placeholders, while gsutil is designed to skip them.
+        # Note: There are several known issues where gsutil cp -I behaves differently than gcloud storage cp --read-paths-from-stdin, particularly around not copying entire directories or not detecting all files specified in the input.
+        # Note: gcloud storage cp will attempt to copy all valid sources even if one of the specified sources is invalid. In contrast, gsutil cp may halt the entire operation if an early source argument is invalid.
+        # Note: When downloading an object, gcloud storage cp will create any missing local directories in the destination path. gsutil cp will fail if the destination directory does not exist.
+        # Note: Gcloud Storage is meant as a tool to work with GCS (cloud). So it does not support local copying (where both source and destination are local files/folders). Trying to use the tool this way will cause an error.
+        - sudo gcloud storage cp gs://"{{ cert_bucket }}"/lxha_ag_certificate.pvk /mnt/disks/mssql/data/
+    - name: Change owner and mode for certificate
+      ansible.builtin.command: "{{ item }}"
+      with_items:
+        - sudo chown mssql:mssql /mnt/disks/mssql/data/lxha_ag_certificate.cer
+        - sudo chmod 660 /mnt/disks/mssql/data/lxha_ag_certificate.cer
+        - sudo chown mssql:mssql /mnt/disks/mssql/data/lxha_ag_certificate.pvk
+        - sudo chmod 660 /mnt/disks/mssql/data/lxha_ag_certificate.pvk
+    - name: Create the certificate on ha-1,ha-2 from the downloaded files
+      ansible.builtin.shell: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '{{ sql_password }}' -Q "{{ keys_transfer }}" -No
+    - name: Create an endpoint on lxha-1 and lxha-2
+      ansible.builtin.shell: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '{{ sql_password }}' -Q "{{ create_endpoint }}" -No
+    - name: Add the nodes to the availability group
+      ansible.builtin.shell: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '{{ sql_password }}' -Q "{{ add_to_aoag1 }}" -No
 
 - name: Configure common sets for all nodes in  pacemaker cluster
   hosts: ha-0, ha-1, ha-2
@@ -231,7 +259,7 @@
     - name: Update zypper cache for SUSE family systems
       ansible.builtin.shell: sudo zypper refresh
       when: ansible_os_family == "Suse"
-   # TODO: Add support for RHEL and SUSE
+    # TODO: Add support for RHEL and SUSE
     - name: Install cluster software on Debian/Ubuntu systems
       ansible.builtin.package:
         name:
@@ -274,7 +302,7 @@
             login_password: "{{ sql_password }}"
             login_host: "{{ ansible_host }}"
             db: "master"
-            script:  |
+            script: |
               CREATE LOGIN [pacemaker] with PASSWORD= N'{{ pacemaker_password }}';
               ALTER SERVER ROLE [sysadmin] ADD MEMBER [pacemaker];
         - name: grant the pacemaker login permissions to the availability group
@@ -283,7 +311,7 @@
             login_password: "{{ sql_password }}"
             login_host: "{{ ansible_host }}"
             db: "master"
-            script:  |
+            script: |
               GRANT ALTER, CONTROL, VIEW DEFINITION ON AVAILABILITY GROUP::[aoag1] TO [pacemaker];
               GRANT VIEW SERVER STATE TO [pacemaker];
               GO
@@ -308,7 +336,7 @@
           package:
             name: haproxy
             state: present
-        - name:  Append the following section at the end of the haproxy.cfg file
+        - name: Append the following section at the end of the haproxy.cfg file
           ansible.builtin.blockinfile:
             path: /etc/haproxy/haproxy.cfg
             block: |
@@ -318,7 +346,7 @@
               listen healthcheck
               bind *:60011
         - name: Start HAProxy service and confirm configuration
-          ansible.builtin.command:  "{{ item }}"
+          ansible.builtin.command: "{{ item }}"
           with_items:
             - sudo systemctl start haproxy.service
             - sudo systemctl enable haproxy.service
@@ -332,7 +360,14 @@
     - name: Generate cluster authentication key
       ansible.builtin.command: sudo corosync-keygen
     - name: Upload corosync certificate into bucket
-      ansible.builtin.command: sudo gsutil cp /etc/corosync/authkey gs://"{{ cert_bucket }}"/
+      # Note: gcloud storage cp performs parallel uploads and downloads by default for improved performance. gsutil requires the top-level -m flag to enable this behavior.
+      # Note: gcloud storage does not support parallel invocations (running the CLI from multiple terminals at the same time), which can lead to flaky behaviour.
+      # Note: Folders created via the Cloud Console are 0-byte placeholder objects. gcloud storage cp copies these placeholders, while gsutil is designed to skip them.
+      # Note: There are several known issues where gsutil cp -I behaves differently than gcloud storage cp --read-paths-from-stdin, particularly around not copying entire directories or not detecting all files specified in the input.
+      # Note: gcloud storage cp will attempt to copy all valid sources even if one of the specified sources is invalid. In contrast, gsutil cp may halt the entire operation if an early source argument is invalid.
+      # Note: When downloading an object, gcloud storage cp will create any missing local directories in the destination path. gsutil cp will fail if the destination directory does not exist.
+      # Note: Gcloud Storage is meant as a tool to work with GCS (cloud). So it does not support local copying (where both source and destination are local files/folders). Trying to use the tool this way will cause an error.
+      ansible.builtin.command: sudo gcloud storage cp /etc/corosync/authkey gs://"{{ cert_bucket }}"/
     - name: Clear /etc/corosync/corosync.conf
       ansible.builtin.shell: sudo cat /dev/null > /etc/corosync/corosync.conf
     - name: Create Corosync log file
@@ -382,7 +417,14 @@
               }
           }
     - name: Upload corosync.conf into bucket
-      ansible.builtin.command: sudo gsutil cp /etc/corosync/corosync.conf gs://"{{ cert_bucket }}"/
+      # Note: gcloud storage cp performs parallel uploads and downloads by default for improved performance. gsutil requires the top-level -m flag to enable this behavior.
+      # Note: gcloud storage does not support parallel invocations (running the CLI from multiple terminals at the same time), which can lead to flaky behaviour.
+      # Note: Folders created via the Cloud Console are 0-byte placeholder objects. gcloud storage cp copies these placeholders, while gsutil is designed to skip them.
+      # Note: There are several known issues where gsutil cp -I behaves differently than gcloud storage cp --read-paths-from-stdin, particularly around not copying entire directories or not detecting all files specified in the input.
+      # Note: gcloud storage cp will attempt to copy all valid sources even if one of the specified sources is invalid. In contrast, gsutil cp may halt the entire operation if an early source argument is invalid.
+      # Note: When downloading an object, gcloud storage cp will create any missing local directories in the destination path. gsutil cp will fail if the destination directory does not exist.
+      # Note: Gcloud Storage is meant as a tool to work with GCS (cloud). So it does not support local copying (where both source and destination are local files/folders). Trying to use the tool this way will cause an error.
+      ansible.builtin.command: sudo gcloud storage cp /etc/corosync/corosync.conf gs://"{{ cert_bucket }}"/
     - name: Restart the corosync services
       service:
         name: corosync
@@ -400,11 +442,25 @@
       ansible.builtin.shell: sudo mkdir -p /var/log/corosync
       when: ansible_os_family == "RedHat" or ansible_os_family == "Suse"
     - name: Download corosync certificate
-      ansible.builtin.command: sudo gsutil cp gs://"{{ cert_bucket }}"/authkey /etc/corosync
+      # Note: gcloud storage cp performs parallel uploads and downloads by default for improved performance. gsutil requires the top-level -m flag to enable this behavior.
+      # Note: gcloud storage does not support parallel invocations (running the CLI from multiple terminals at the same time), which can lead to flaky behaviour.
+      # Note: Folders created via the Cloud Console are 0-byte placeholder objects. gcloud storage cp copies these placeholders, while gsutil is designed to skip them.
+      # Note: There are several known issues where gsutil cp -I behaves differently than gcloud storage cp --read-paths-from-stdin, particularly around not copying entire directories or not detecting all files specified in the input.
+      # Note: gcloud storage cp will attempt to copy all valid sources even if one of the specified sources is invalid. In contrast, gsutil cp may halt the entire operation if an early source argument is invalid.
+      # Note: When downloading an object, gcloud storage cp will create any missing local directories in the destination path. gsutil cp will fail if the destination directory does not exist.
+      # Note: Gcloud Storage is meant as a tool to work with GCS (cloud). So it does not support local copying (where both source and destination are local files/folders). Trying to use the tool this way will cause an error.
+      ansible.builtin.command: sudo gcloud storage cp gs://"{{ cert_bucket }}"/authkey /etc/corosync
     - name: Download corosync.conf
-      ansible.builtin.command: sudo gsutil cp gs://"{{ cert_bucket }}"/corosync.conf /etc/corosync
+      # Note: gcloud storage cp performs parallel uploads and downloads by default for improved performance. gsutil requires the top-level -m flag to enable this behavior.
+      # Note: gcloud storage does not support parallel invocations (running the CLI from multiple terminals at the same time), which can lead to flaky behaviour.
+      # Note: Folders created via the Cloud Console are 0-byte placeholder objects. gcloud storage cp copies these placeholders, while gsutil is designed to skip them.
+      # Note: There are several known issues where gsutil cp -I behaves differently than gcloud storage cp --read-paths-from-stdin, particularly around not copying entire directories or not detecting all files specified in the input.
+      # Note: gcloud storage cp will attempt to copy all valid sources even if one of the specified sources is invalid. In contrast, gsutil cp may halt the entire operation if an early source argument is invalid.
+      # Note: When downloading an object, gcloud storage cp will create any missing local directories in the destination path. gsutil cp will fail if the destination directory does not exist.
+      # Note: Gcloud Storage is meant as a tool to work with GCS (cloud). So it does not support local copying (where both source and destination are local files/folders). Trying to use the tool this way will cause an error.
+      ansible.builtin.command: sudo gcloud storage cp gs://"{{ cert_bucket }}"/corosync.conf /etc/corosync
     - name: Change mode for authkey and /etc/corosync/corosync.conf
-      ansible.builtin.shell:   "{{ item }}"
+      ansible.builtin.shell: "{{ item }}"
       with_items:
         - sudo chmod 400 /etc/corosync/authkey
         - sudo chmod 400 /etc/corosync/corosync.conf
@@ -427,7 +483,7 @@
     pacemaker_password: "{{ hostvars['localhost']['pacemaker_password'] }}"
   tasks:
     - name: Configure CRM cluster
-      ansible.builtin.command:  "{{ item }}"
+      ansible.builtin.command: "{{ item }}"
       with_items:
         - sudo crm configure property stonith-enabled=false
         - sudo crm configure property cluster-recheck-interval=2min
@@ -443,7 +499,7 @@
     - name: Confirm the status of cluster and verify the configuration
       ansible.builtin.shell: sudo crm status
     - name: Create a health check resource for the HAProxy service in your pacemaker cluster
-      ansible.builtin.command:  "{{ item }}"
+      ansible.builtin.command: "{{ item }}"
       with_items:
         - sudo pcs resource create pcs-healthcheck service:haproxy op monitor interval=10s timeout=20s
         - sudo crm status
@@ -457,13 +513,13 @@
       ignore_errors: true
       when: ansible_os_family == "RedHat" or ansible_os_family == "Ubuntu"
     - name: Create the virtual IP address pacemaker resource
-      ansible.builtin.command:  sudo pcs resource create pcs-cluster-vip ocf:heartbeat:IPaddr2 ip="{{ cluster_ip }}" nic="{{ ansible_facts['default_ipv4']['interface'] }}" cidr_netmask=32 op monitor interval=3600s timeout=60s
+      ansible.builtin.command: sudo pcs resource create pcs-cluster-vip ocf:heartbeat:IPaddr2 ip="{{ cluster_ip }}" nic="{{ ansible_facts['default_ipv4']['interface'] }}" cidr_netmask=32 op monitor interval=3600s timeout=60s
       when: ansible_os_family == "RedHat" or ansible_os_family == "Ubuntu"
     - name: Create crm healthcheck file
       ansible.builtin.file:
         path: /tmp/crm_haproxy_healthcheck.sh
         state: touch
-        mode: '0755'
+        mode: "0755"
       when: ansible_os_family == "Suse"
     - name: Create crm_haproxy_healthcheck.sh script
       ansible.builtin.blockinfile:
@@ -478,7 +534,7 @@
               op monitor interval=3600s timeout=60s
           commit
           EOF
-        mode: '0755'
+        mode: "0755"
       when: ansible_os_family == "Suse"
     - name: Configure CRM cluster resources
       ansible.builtin.command: sh /tmp/crm_haproxy_healthcheck.sh
@@ -512,15 +568,15 @@
       when: ansible_os_family == "Suse"
     - name: Create a listener for your SQL Server availability group
       community.general.mssql_script:
-         login_user: "sa"
-         login_password: "{{ sql_password }}"
-         login_host: "{{ node1_name }}"
-         db: "master"
-         script:  |
-           ALTER AVAILABILITY GROUP aoag1
-           ADD LISTENER 'aoag1-listener' (
-           WITH IP (('{{ cluster_ip }}','255.255.255.0')), PORT=1433
-           )
+        login_user: "sa"
+        login_password: "{{ sql_password }}"
+        login_host: "{{ node1_name }}"
+        db: "master"
+        script: |
+          ALTER AVAILABILITY GROUP aoag1
+          ADD LISTENER 'aoag1-listener' (
+          WITH IP (('{{ cluster_ip }}','255.255.255.0')), PORT=1433
+          )
     - name: Check if the fence_gce
       ansible.builtin.shell: sudo pcs stonith list | grep fence_gce
       when: ansible_os_family == "RedHat" or ansible_os_family == "Ubuntu"
@@ -603,21 +659,21 @@
       ansible.builtin.file:
         path: /etc/systemd/system/corosync.service.d
         state: directory
-        mode: '0755'
+        mode: "0755"
     - name: Create systemd drop-in file for corosync.service
       ansible.builtin.file:
         path: /etc/systemd/system/corosync.service.d/delay-start.conf
         state: touch
-        mode: '0644'
+        mode: "0644"
     - name: Create drop-in file with start delay
       ansible.builtin.blockinfile:
         path: /etc/systemd/system/corosync.service.d/delay-start.conf
         block: |
           [Service]
           ExecStartPre=/bin/sleep 60
-        mode: '0644'
+        mode: "0644"
     - name: Reload the service manager and check if the configuration is taken into account
-      ansible.builtin.command:  "{{ item }}"
+      ansible.builtin.command: "{{ item }}"
       with_items:
         - sudo systemctl daemon-reload
         - sudo systemctl status corosync.service --no-pager

@@ -156,11 +156,11 @@ Configuration ConfigurationWorkload {
     # If media bucket is present, use the iso file in the bucket to install SQL server
     if ($Parameters.isoBucket -and -not (Test-Path "$sqlFolderName\setup.exe")) {
         # Get the first iso file in the specified bucket
-        $isoImagePath = gsutil ls gs://$($Parameters.isoBucket)/*.iso
+        $isoImagePath = gcloud storage ls gs://$($Parameters.isoBucket)/*.iso
 
         $tempErrorActionPreference = $ErrorActionPreference
         $ErrorActionPreference = 'SilentlyContinue'
-        gsutil cp -n $isoImagePath c:\temp
+        gcloud storage cp --no-clobber $isoImagePath c:\temp
         $ErrorActionPreference = $tempErrorActionPreference
 
         $isoImage = ($isoImagePath -split '\/')[-1]

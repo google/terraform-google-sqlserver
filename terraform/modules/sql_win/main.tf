@@ -214,4 +214,7 @@ resource "google_compute_instance" "sql_win" {
 
   allow_stopping_for_update = true
 
+  timeouts {
+    create = "15m"
+  }
 }

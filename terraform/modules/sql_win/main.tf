@@ -14,7 +14,7 @@
 
 provider "google" {
   project         = local.project_id
-  request_timeout = "30m"
+  request_timeout = "5m"
 }
 
 data "google_project" "project" {
@@ -213,8 +213,4 @@ resource "google_compute_instance" "sql_win" {
   }
 
   allow_stopping_for_update = true
-
-  timeouts {
-    create = "15m"
-  }
 }

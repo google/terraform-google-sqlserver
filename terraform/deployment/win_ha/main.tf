@@ -80,7 +80,9 @@ module "witness" {
   machine_type                     = var.machine_type
   disk_type                        = var.disk_type
   is_smt_off                       = var.is_smt_off
-  is_temp_db_on_local_ssd          = var.is_sole_tenant ? false : var.is_temp_db_on_local_ssd
+  # The witness does not host tempdb, so it never needs a local SSD. Requesting
+  # one only makes it more likely to hit ZONE_RESOURCE_POOL_EXHAUSTED.
+  is_temp_db_on_local_ssd          = false
   node_count                       = 1
   sysprep_file                     = "witness_aoag.ps1"
   mask                             = 0

@@ -97,7 +97,10 @@ resource "google_compute_instance" "sql_win" {
 
   lifecycle {
     ignore_changes = [
-      metadata["sysprep-specialize-script-ps1"]
+      metadata["sysprep-specialize-script-ps1"],
+      # Data and log disks are attached by the google_compute_attached_disk
+      # resources below rather than at instance creation.
+      attached_disk,
     ]
   }
 
@@ -106,20 +109,6 @@ resource "google_compute_instance" "sql_win" {
       image = local.vm_image
       type  = local.disk_type
       size  = 100
-    }
-  }
-
-  dynamic attached_disk {
-    for_each = range(local.capacity_data_disk_count)
-    content {
-      source = google_compute_disk.data_disk[count.index * local.capacity_data_disk_count + attached_disk.key].self_link
-    }
-  }
-
-  dynamic attached_disk {
-    for_each = range(local.capacity_log_disk_count)
-    content {
-      source = google_compute_disk.log_disk[count.index * local.capacity_log_disk_count + attached_disk.key].self_link
     }
   }
 
@@ -213,4 +202,34 @@ resource "google_compute_instance" "sql_win" {
   }
 
   allow_stopping_for_update = true
+}
+
+# Attach the data and log disks after the instance has been created.
+#
+# Creating an instance that attaches freshly created persistent disks in the
+# same instances.insert call frequently stalls in Compute Engine (about 120s per
+# attempt, see b/535691499). Two or three stalled attempts exceed the provider's
+# fixed 5 minute limit for the insert request and fail the deployment. Instances
+# without attached disks (e.g. the witness) are accepted within seconds, so the
+# disks are attached separately via instances.attachDisk instead.
+resource "google_compute_attached_disk" "data_disk" {
+  count    = local.node_count * local.capacity_data_disk_count
+  project  = local.project_id
+  disk     = google_compute_disk.data_disk[count.index].self_link
+  instance = google_compute_instance.sql_win[floor(count.index / local.capacity_data_disk_count)].self_link
+
+  timeouts {
+    create = "15m"
+  }
+}
+
+resource "google_compute_attached_disk" "log_disk" {
+  count    = local.node_count * local.capacity_log_disk_count
+  project  = local.project_id
+  disk     = google_compute_disk.log_disk[count.index].self_link
+  instance = google_compute_instance.sql_win[floor(count.index / local.capacity_log_disk_count)].self_link
+
+  timeouts {
+    create = "15m"
+  }
 }

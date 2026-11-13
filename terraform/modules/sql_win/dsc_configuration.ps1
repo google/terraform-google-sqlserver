@@ -409,15 +409,39 @@ Configuration ConfigurationWorkload {
                         time = (Get-Date).ToString();
                         instance_name = $using:ComputerName;
                     }
-                    # Select the largest sized RAW disk
-                    $rawDiskNumber = (Get-Disk | Where-Object {$_.PartitionStyle -eq 'RAW'} | Sort-Object -Property Size -Descending | Select-Object -Property Number -First 1).Number
-
-                    if ($rawDiskNumber -ne $null) {
-                        # Format data disk
-                        Initialize-Disk -Number $rawDiskNumber -PartitionStyle MBR -PassThru
-                        New-Partition -DiskNumber $rawDiskNumber -DriveLetter 'D' -UseMaximumSize
-                        Format-Volume -DriveLetter 'D' -FileSystem NTFS -AllocationUnitSize 65536 -NewFileSystemLabel 'Data' -Confirm:$false
+                    # Data and log disks are attached after the instance is
+                    # created (google_compute_attached_disk), so wait until a RAW
+                    # persistent disk is visible before selecting it. Local SSDs
+                    # (scratch disks) are already RAW at boot and are reserved for
+                    # TEMPDB, so exclude them from both the wait and the selection.
+                    $diskWaitDeadline = (Get-Date).AddMinutes(20)
+                    while (-not (Get-Disk | Where-Object {$_.PartitionStyle -eq 'RAW' -and $using:localSSDNames -notcontains $_.FriendlyName}) -and (Get-Date) -lt $diskWaitDeadline) {
+                        Start-Sleep -Seconds 10
+                        Update-HostStorageCache
                     }
+
+                    # Select the largest sized RAW persistent disk
+                    $rawDiskNumber = (Get-Disk | Where-Object {$_.PartitionStyle -eq 'RAW' -and $using:localSSDNames -notcontains $_.FriendlyName} | Sort-Object -Property Size -Descending | Select-Object -Property Number -First 1).Number
+
+                    if ($null -eq $rawDiskNumber) {
+                        $errorMessage = 'Timed out waiting for a RAW persistent data disk to be attached.'
+                        New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{
+                            deployment_name = $using:deploymentName;
+                            times = (Get-Date).ToString();
+                            instance_name = $using:ComputerName;
+                            dsc_resource = 'PrepareDataDisks';
+                            operation = 'WaitForDisk'
+                            status = 'ERROR';
+                            error_message = $errorMessage;
+                            suggested_remediation = 'Verify the data disk was attached to the instance (google_compute_attached_disk).'
+                        }
+                        throw $errorMessage
+                    }
+
+                    # Format data disk
+                    Initialize-Disk -Number $rawDiskNumber -PartitionStyle MBR -PassThru
+                    New-Partition -DiskNumber $rawDiskNumber -DriveLetter 'D' -UseMaximumSize
+                    Format-Volume -DriveLetter 'D' -FileSystem NTFS -AllocationUnitSize 65536 -NewFileSystemLabel 'Data' -Confirm:$false
 
                     # Create data and log folders for SQL Server
                     New-Item -Path 'D:\Data'  -ItemType directory;
@@ -477,15 +501,39 @@ Configuration ConfigurationWorkload {
                         time = (Get-Date).ToString();
                         instance_name = $using:ComputerName;
                     }
-                    # Select the largest sized RAW disk
-                    $rawDiskNumber = (Get-Disk | Where-Object {$_.PartitionStyle -eq 'RAW'} | Sort-Object -Property Size -Descending | Select-Object -Property Number -First 1).Number
-
-                    if ($rawDiskNumber -ne $null) {
-                        # Format log disk
-                        Initialize-Disk -Number $rawDiskNumber -PartitionStyle MBR -PassThru
-                        New-Partition -DiskNumber $rawDiskNumber -DriveLetter 'E' -UseMaximumSize
-                        Format-Volume -DriveLetter 'E' -FileSystem NTFS -AllocationUnitSize 65536 -NewFileSystemLabel 'Log' -Confirm:$false
+                    # Data and log disks are attached after the instance is
+                    # created (google_compute_attached_disk), so wait until a RAW
+                    # persistent disk is visible before selecting it. Local SSDs
+                    # (scratch disks) are already RAW at boot and are reserved for
+                    # TEMPDB, so exclude them from both the wait and the selection.
+                    $diskWaitDeadline = (Get-Date).AddMinutes(20)
+                    while (-not (Get-Disk | Where-Object {$_.PartitionStyle -eq 'RAW' -and $using:localSSDNames -notcontains $_.FriendlyName}) -and (Get-Date) -lt $diskWaitDeadline) {
+                        Start-Sleep -Seconds 10
+                        Update-HostStorageCache
                     }
+
+                    # Select the largest sized RAW persistent disk
+                    $rawDiskNumber = (Get-Disk | Where-Object {$_.PartitionStyle -eq 'RAW' -and $using:localSSDNames -notcontains $_.FriendlyName} | Sort-Object -Property Size -Descending | Select-Object -Property Number -First 1).Number
+
+                    if ($null -eq $rawDiskNumber) {
+                        $errorMessage = 'Timed out waiting for a RAW persistent log disk to be attached.'
+                        New-GcLogEntry -LogName 'Ansible_logs' -JsonPayload @{
+                            deployment_name = $using:deploymentName;
+                            times = (Get-Date).ToString();
+                            instance_name = $using:ComputerName;
+                            dsc_resource = 'PrepareLogDisks';
+                            operation = 'WaitForDisk'
+                            status = 'ERROR';
+                            error_message = $errorMessage;
+                            suggested_remediation = 'Verify the log disk was attached to the instance (google_compute_attached_disk).'
+                        }
+                        throw $errorMessage
+                    }
+
+                    # Format log disk
+                    Initialize-Disk -Number $rawDiskNumber -PartitionStyle MBR -PassThru
+                    New-Partition -DiskNumber $rawDiskNumber -DriveLetter 'E' -UseMaximumSize
+                    Format-Volume -DriveLetter 'E' -FileSystem NTFS -AllocationUnitSize 65536 -NewFileSystemLabel 'Log' -Confirm:$false
 
                     # Create a log folder for SQL Server
                     New-Item -Path 'E:\Logs'  -ItemType directory;
@@ -519,7 +567,7 @@ Configuration ConfigurationWorkload {
                     }
                 }
                 PsDscRunAsCredential = $domainCredential
-                DependsOn            = '[WindowsFeature]NetFramework45'
+                DependsOn            = '[WindowsFeature]NetFramework45', '[Script]PrepareDataDisk'
             }
         }
 
